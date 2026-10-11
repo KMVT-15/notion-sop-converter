@@ -3,6 +3,7 @@ dist/
 .demo/
 .cache/
 .env
+sop.config.local.json
 .*.tmp-*/
 .*.old-*/
 .DS_Store

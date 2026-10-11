@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
-import { build } from "../src/build.js";
+import { build, settings } from "../src/build.js";
 import { Notion, NotionError } from "../src/notion.js";
 import { startFakeNotion, TEST_TOKEN } from "./fake-notion.js";
 import { CHANGELOG_DB, EXAMPLE_SKIPPED_PARA, OPERATOR_PC_BLOCK, ROOT_ID, SUNNYVALE_ID, TEMPLATE_ID } from "./fixtures/notion.js";
@@ -135,4 +135,51 @@ test("a wrong token fails with a clear message", async () => {
 test("an unshared root page gives the Connections hint", async () => {
   await assert.rejects(run(path.join(work, "x"), { config: { rootPage: "https://www.notion.so/Nope-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } }),
     /Connections > add your integration/);
+});
+
+test("the site is readable by the web server's user even under a strict umask", async () => {
+  const out = path.join(work, "umask-site");
+  const old = process.umask(0o077); // would make files 600 and folders 700
+  try {
+    await run(out);
+  } finally {
+    process.umask(old);
+  }
+  const modes = [out, path.join(out, "index.html"), path.join(out, "assets"), path.join(out, "assets", "img"),
+    path.join(out, "assets", "site.css")].map((p) => (statSync(p).mode & 0o777).toString(8));
+  assert.deepEqual(modes, ["755", "644", "755", "755", "644"]);
+});
+
+test("if the previous copy can't be deleted (e.g. chowned to www-data), the build still succeeds and says so", async () => {
+  const out = path.join(work, "chowned-site");
+  await run(out);
+  const locked = path.join(out, "assets", "img");
+  chmodSync(locked, 0o555); // like a folder owned by another user: its files can't be deleted
+  try {
+    const r = await run(out);
+    assert.equal(r.warnings.length, 2, r.warnings.join("\n")); // the Sunnyvale buttons warning, plus this one
+    assert.match(r.warnings[1], /the new site is in place, but the previous copy couldn't be deleted \(EACCES\)/);
+    assert.ok(existsSync(path.join(out, "index.html")));
+  } finally {
+    for (const d of readdirSync(work).filter((f) => f.startsWith(".chowned-site.old-"))) {
+      chmodSync(path.join(work, d, "assets", "img"), 0o755);
+      rmSync(path.join(work, d), { recursive: true, force: true });
+    }
+  }
+});
+
+test("outDir in the config can be absolute (e.g. /var/www/sops) or relative to the config file", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "sop-settings-"));
+  const cfg = (outDir) => {
+    writeFileSync(path.join(dir, "sop.config.json"), JSON.stringify({ rootPage: ROOT_ID, outDir }));
+    return settings({ config: path.join(dir, "sop.config.json") }).outDir;
+  };
+  assert.equal(cfg("/var/www/sops"), "/var/www/sops");
+  assert.equal(cfg("dist"), path.join(dir, "dist"));
+  assert.equal(settings({ config: path.join(dir, "sop.config.json"), out: "/srv/x" }).outDir, "/srv/x", "--out wins");
+  writeFileSync(path.join(dir, "sop.config.local.json"), JSON.stringify({ outDir: "/var/www/local" }));
+  const s = settings({ config: path.join(dir, "sop.config.json") });
+  assert.equal(s.outDir, "/var/www/local", "sop.config.local.json overrides the shared config");
+  assert.equal(s.config.rootPage, ROOT_ID, "and keeps everything else");
+  rmSync(dir, { recursive: true, force: true });
 });

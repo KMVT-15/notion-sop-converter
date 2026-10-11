@@ -75,7 +75,8 @@ Order matters in `build()`: **every** page is converted before **any** page is r
   - **Notion's times are rounded to the minute:** anything edited within `SETTLE_MS` (2 min) of the previous `takenAt` triggers one more build.
   - **Lock:** `<cacheDir>/build.lock` (pid). `npm run build` takes it, and refuses to start while another live build holds it. The checker silently skips while it's held. A dead holder's lock is taken over.
   - An old plain-text marker, or none, means "no previous build", so the checker rebuilds once.
-- **Safe output swap:** build into a hidden temp folder next to `outDir` (chmod 755, because `mkdtemp` makes it owner-only and the web server must read it), then rename it into place. The build refuses to replace a non-empty folder without the `.city-sops-build` marker, since `--out` might be pointed at a shared web root.
+- **Settings:** `sop.config.json` is shared and in git (no secrets; the token is in `.env`). A git-ignored `sop.config.local.json` overrides it per machine, e.g. the server's `outDir: /var/www/sops`, because `/root` isn't reachable by nginx. `outDir`/`cacheDir` may be absolute or relative to the config file.
+- **Safe output swap:** build into a hidden temp folder next to `outDir`, then `makeReadable()` it (folders 755, files 644, whatever the umask; `mkdtemp` alone is owner-only), then rename it into place. Served by nginx straight from `dist` (owner, 2026-10-10). The site needs no chown. If deleting the previous copy fails afterwards (e.g. someone chowned it to www-data), that's a warning, not a failed build, because the new site is already live. The build refuses to replace a non-empty folder without the `.city-sops-build` marker, since `--out` might be pointed at a shared web root.
 
 ## Testing
 

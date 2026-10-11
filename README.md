@@ -57,6 +57,27 @@ If a build fails (Notion is down, the token is wrong…), the previous `dist/` i
 
 **Preview locally:** `npm run serve` → <http://localhost:8080>.
 
+### Serving it with nginx
+
+Point nginx's `root` straight at the build folder:
+
+```nginx
+server {
+    listen 80;
+    server_name sops.example.internal;
+    root /path/to/notion-sop-converter/dist;
+    index index.html;
+}
+```
+
+- **Don't `chown` the folder to `www-data`.** The build makes every file readable by everyone (files 644, folders 755), which is all nginx needs. Each build replaces the folder, so a chown wouldn't last anyway, and it stops the next build from deleting the old copy.
+- **If the project lives in `/root`** (or any private folder), nginx can't reach anything inside it. Put `{ "outDir": "/var/www/sops" }` in `sop.config.local.json` and point nginx's `root` there.
+- **403 Forbidden** almost always means nginx's user can't *pass through* one of the folders above `dist`. On Ubuntu, home folders are usually `750`.
+  - Find the blocking folder: `namei -l /path/to/notion-sop-converter/dist/index.html`. Look for a folder without `x` in its last three permission characters.
+  - Fix it with `chmod o+x` on that folder, which lets others pass through without listing it. Or build somewhere outside your home folder with `--out` (the build needs write access to the folder that contains it).
+  - nginx's error log (`/var/log/nginx/error.log`) names the path it was denied.
+- **SELinux** (RHEL, Fedora, Rocky): files under a home folder also need `sudo chcon -R -t httpd_sys_content_t /path/to/dist`. That has to be repeated after each build, so building into `/var/www` with `--out` is simpler.
+
 ### Rebuilding automatically (cron)
 
 `npm run build:if-changed` checks Notion and runs the build only if something changed since the last build. It checks for:
@@ -84,13 +105,19 @@ Any build options are passed through, so to keep the web server's folder up to d
 
 ## Settings (`sop.config.json`)
 
+`sop.config.json` is shared (it's in git). For settings that differ on one machine, typically `outDir` on the server, create **`sop.config.local.json`** next to it with just those keys. It's git-ignored and overrides the shared file:
+
+```json
+{ "outDir": "/var/www/sops" }
+```
+
 | Key | Meaning |
 |---|---|
 | `rootPage` | Link to the Notion page whose sub-pages are the SOPs. Change this if the SOPs move, e.g. into the Wiki. |
 | `exclude` | Sub-page titles to leave off the site (default `["Template"]`). |
 | `skipSections` | Heading/database titles left out of every SOP, with everything under them (default `Change Log`, `Changelog`). They're never even downloaded. |
 | `timezone` | Time zone for "Updated" dates and the build time (default `America/Los_Angeles`). |
-| `outDir` | Where `npm run build` writes the site (default `dist`). |
+| `outDir` | Where `npm run build` writes the site (default `dist`). Relative to this file, or absolute, e.g. `/var/www/sops`. |
 | `cacheDir` | Where photos, map lookups and the build lock are kept (default `.cache`). |
 | `siteTitle` | Optional. Home page title; defaults to the Notion page's title ("City Operations"). |
 

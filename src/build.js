@@ -69,7 +69,6 @@ export async function build({
 
   await fs.mkdir(path.dirname(outDir), { recursive: true });
   const tmp = await fs.mkdtemp(path.join(path.dirname(outDir), `.${path.basename(outDir)}.tmp-`));
-  await fs.chmod(tmp, 0o755); // mkdtemp makes it owner-only; the web server must be able to read it
   let docs;
   try {
     const assets = new Assets({ outDir: path.join(tmp, "assets"), cacheDir, images, useCache: cache, warn });
@@ -121,7 +120,8 @@ export async function build({
       databases: Object.fromEntries(docs.flatMap((d) => d.databases.map((db) => [db.id, { ...db, page: d.title }]))),
     });
     await fs.writeFile(path.join(tmp, MARKER), markerText(snap, now));
-    await swapIn(tmp, outDir);
+    await makeReadable(tmp);
+    await swapIn(tmp, outDir, warn);
     if (images) await assets.pruneCache();
     await maps.save();
   } catch (e) {
@@ -202,7 +202,18 @@ async function assertReplaceable(outDir) {
   }
 }
 
-async function swapIn(tmp, outDir) {
+/**
+ * Everything world-readable (folders 755, files 644) whatever the umask (mkdtemp alone makes
+ * the folder owner-only), so the web server's user (e.g. www-data) can serve it. No chown needed.
+ */
+async function makeReadable(dir) {
+  await fs.chmod(dir, 0o755);
+  for (const e of await fs.readdir(dir, { withFileTypes: true, recursive: true })) {
+    await fs.chmod(path.join(e.parentPath, e.name), e.isDirectory() ? 0o755 : 0o644);
+  }
+}
+
+async function swapIn(tmp, outDir, warn) {
   if (!existsSync(outDir)) {
     await fs.rename(tmp, outDir);
     return;
@@ -223,7 +234,13 @@ async function swapIn(tmp, outDir) {
     await fs.rename(old, outDir);
     throw e;
   }
-  await fs.rm(old, { recursive: true, force: true });
+  try {
+    await fs.rm(old, { recursive: true, force: true });
+  } catch (e) {
+    // The new site is already live; a leftover copy isn't a failed build.
+    warn(`the new site is in place, but the previous copy couldn't be deleted (${e.code}): ${old}. ` +
+      "Delete it by hand. This usually means its owner was changed (e.g. chown www-data); the build doesn't need that.");
+  }
 }
 
 export function parseArgs(argv) {
@@ -254,15 +271,20 @@ export function loadToken() {
   return token;
 }
 
-/** Config file, settings and resolved folders for a set of CLI args. */
+/**
+ * Config file, settings and resolved folders for a set of CLI args. Settings in an optional,
+ * git-ignored `<name>.local.json` next to the config (e.g. sop.config.local.json) override the
+ * shared ones, for things that differ per machine like outDir.
+ */
 export function settings(args) {
   const configPath = path.resolve(args.config || path.join(ROOT, "sop.config.json"));
-  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  const localPath = configPath.replace(/\.json$/, "") + ".local.json";
+  const config = { ...JSON.parse(readFileSync(configPath, "utf8")), ...(existsSync(localPath) ? JSON.parse(readFileSync(localPath, "utf8")) : {}) };
   const base = path.dirname(configPath);
   const cacheRoot = path.resolve(base, config.cacheDir || DEFAULTS.cacheDir);
   return {
     config,
-    outDir: path.resolve(args.out || path.join(base, config.outDir || DEFAULTS.outDir)),
+    outDir: args.out ? path.resolve(args.out) : path.resolve(base, config.outDir || DEFAULTS.outDir), // absolute or relative to the config file
     cacheRoot,
     lockFile: path.join(cacheRoot, "build.lock"),
   };
