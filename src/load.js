@@ -22,6 +22,7 @@ const FILE_TYPES = new Set(["file", "pdf", "video", "audio"]);
  * @param {(msg: string) => void} ctx.warn
  * @param {string[]} [ctx.unsupported]  collects block types the API returns as "unsupported" (e.g. "button")
  * @param {import('./maps.js').MapResolver} [ctx.maps]  resolves Google Maps links for map tiles
+ * @param {Array} [ctx.databases]  collects inline databases' row ids and edit times (for change detection)
  */
 export async function loadBlocks(api, blockId, ctx) {
   const kept = dropSkipped(await api.children(blockId), ctx.skip);
@@ -76,11 +77,10 @@ async function loadBlock(api, b, ctx) {
 async function loadDatabase(api, id, title, ctx) {
   try {
     const [meta, rows] = await Promise.all([api.database(id), api.query(id)]);
-    return {
-      title: title || plain(meta.title),
-      schema: meta.properties || {},
-      rows: rows.map((r) => r.properties || {}),
-    };
+    title = title || plain(meta.title);
+    // for change detection (changes.js): row edits don't change the page's last-edited time
+    ctx.databases?.push({ id, title, rows: rows.map((r) => ({ id: r.id, last_edited_time: r.last_edited_time })) });
+    return { title, schema: meta.properties || {}, rows: rows.map((r) => r.properties || {}) };
   } catch (e) {
     ctx.warn(`couldn't read database '${title}': ${e.message}`);
     return { title, error: true };

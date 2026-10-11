@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Assets } from "./assets.js";
+import { acquireLock, MARKER, markerText, releaseLock, snapshot } from "./changes.js";
 import { convert } from "./convert.js";
 import { fmtDate, fmtDateTime, slugify } from "./html.js";
 import { createLinker } from "./links.js";
@@ -21,8 +22,7 @@ import { homePage, sopPage } from "./pages.js";
 import { render } from "./render.js";
 import { plain } from "./rich-text.js";
 
-const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const MARKER = ".city-sops-build"; // marks an output folder as ours, so it's safe to replace
+export const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const RESERVED_SLUGS = new Set(["index", "assets"]);
 
 export const DEFAULTS = {
@@ -30,6 +30,7 @@ export const DEFAULTS = {
   skipSections: ["Change Log", "Changelog"],
   timezone: "America/Los_Angeles",
   outDir: "dist",
+  cacheDir: ".cache",
 };
 
 const USAGE = `Usage: npm run build [-- options]
@@ -50,8 +51,6 @@ export async function build({
   cacheDir = path.join(ROOT, ".cache", "assets"), log = console.log, now = new Date(),
 }) {
   const cfg = { ...DEFAULTS, ...config };
-  const rootId = pageIdFrom(cfg.rootPage || "");
-  if (!rootId) throw new Error('"rootPage" in sop.config.json must be a Notion page link or id.');
   outDir = path.resolve(outDir);
   await assertReplaceable(outDir);
 
@@ -62,13 +61,9 @@ export async function build({
   };
   const timeZone = cfg.timezone;
   const skip = cfg.skipSections.map((s) => s.trim().toLowerCase());
-  const excluded = new Set(cfg.exclude.map((s) => s.trim().toLowerCase()));
 
-  const [root, children] = await Promise.all([api.page(rootId), api.children(rootId)]);
-  const entries = children
-    .filter((b) => b.type === "child_page")
-    .map((b) => ({ id: b.id, title: (b.child_page?.title || "").trim() || "Untitled" }))
-    .filter((e) => !excluded.has(e.title.toLowerCase()));
+  const { root, entries } = await listSops(api, cfg);
+  const takenAt = api.serverDate || now; // everything below was read after this moment
   assignSlugs(entries);
   const slugById = new Map(entries.map((e) => [e.id, e.slug]));
 
@@ -81,8 +76,9 @@ export async function build({
     const maps = new MapResolver({ cacheFile: path.join(cacheDir, "maps.json") });
     docs = await Promise.all(entries.map(async (e) => {
       const unsupported = []; // block types Notion's API can't read (e.g. buttons)
+      const databases = []; // inline databases' rows, for change detection
       const pageWarn = (msg) => warn(`${e.title}: ${msg}`);
-      const [page, blocks] = await Promise.all([api.page(e.id), loadBlocks(api, e.id, { skip, assets, maps, warn: pageWarn, unsupported })]);
+      const [page, blocks] = await Promise.all([api.page(e.id), loadBlocks(api, e.id, { skip, assets, maps, warn: pageWarn, unsupported, databases })]);
       for (const [type, n] of countBy(unsupported)) {
         pageWarn(type === "button"
           ? `left out ${n} Notion button${n === 1 ? "" : "s"}; Notion's API can't read buttons. Use a link on its own line instead (see README).`
@@ -91,7 +87,10 @@ export async function build({
       const targets = new Set(); // blocks that links on this page jump to
       const ctx = { link: createLinker({ pageId: e.id, slugById, targets }), timeZone };
       const model = convert(blocks, ctx);
-      return { ...e, ctx, model, targets, icon: await assets.icon(page.icon), updated: fmtDate(page.last_edited_time, timeZone) };
+      return {
+        ...e, ctx, model, targets, databases, edited: page.last_edited_time,
+        icon: await assets.icon(page.icon), updated: fmtDate(page.last_edited_time, timeZone),
+      };
     }));
 
     const { cssHref, jsHref } = await writeStatic(tmp);
@@ -115,7 +114,13 @@ export async function build({
       builtAt: fmtDateTime(now, timeZone),
       cssHref,
     }));
-    await fs.writeFile(path.join(tmp, MARKER), `Built by city-sops on ${now.toISOString()}. This folder is replaced on every build.\n`);
+    // What this build was made from, so `npm run build:if-changed` can tell when Notion has moved on.
+    const snap = snapshot({
+      cfg, root, takenAt,
+      sops: docs.map((d) => ({ id: d.id, title: d.title, edited: d.edited })),
+      databases: Object.fromEntries(docs.flatMap((d) => d.databases.map((db) => [db.id, { ...db, page: d.title }]))),
+    });
+    await fs.writeFile(path.join(tmp, MARKER), markerText(snap, now));
     await swapIn(tmp, outDir);
     if (images) await assets.pruneCache();
     await maps.save();
@@ -124,6 +129,19 @@ export async function build({
     throw e;
   }
   return { outDir, warnings, pages: docs.map((d) => ({ id: d.id, title: d.title, slug: d.slug })) };
+}
+
+/** The parent page and its sub-pages that are SOPs (in Notion's order, exclusions removed). */
+export async function listSops(api, cfg) {
+  const rootId = pageIdFrom(cfg.rootPage || "");
+  if (!rootId) throw new Error('"rootPage" in sop.config.json must be a Notion page link or id.');
+  const excluded = new Set(cfg.exclude.map((s) => s.trim().toLowerCase()));
+  const [root, children] = await Promise.all([api.page(rootId), api.children(rootId)]);
+  const entries = children
+    .filter((b) => b.type === "child_page")
+    .map((b) => ({ id: b.id, title: (b.child_page?.title || "").trim() || "Untitled" }))
+    .filter((e) => !excluded.has(e.title.toLowerCase()));
+  return { root, entries };
 }
 
 function countBy(items) {
@@ -208,7 +226,7 @@ async function swapIn(tmp, outDir) {
   await fs.rm(old, { recursive: true, force: true });
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = { images: true, cache: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -227,13 +245,27 @@ function parseArgs(argv) {
   return args;
 }
 
-function loadToken() {
+export function loadToken() {
   const envFile = path.join(ROOT, ".env");
   if (existsSync(envFile)) process.loadEnvFile(envFile);
   let token = process.env.NOTION_TOKEN || process.env.NOTION_API_KEY;
   const legacy = path.join(os.homedir(), ".config", "kmvt-sop", "token"); // where the Python tool kept it
   if (!token && existsSync(legacy)) token = readFileSync(legacy, "utf8").trim();
   return token;
+}
+
+/** Config file, settings and resolved folders for a set of CLI args. */
+export function settings(args) {
+  const configPath = path.resolve(args.config || path.join(ROOT, "sop.config.json"));
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  const base = path.dirname(configPath);
+  const cacheRoot = path.resolve(base, config.cacheDir || DEFAULTS.cacheDir);
+  return {
+    config,
+    outDir: path.resolve(args.out || path.join(base, config.outDir || DEFAULTS.outDir)),
+    cacheRoot,
+    lockFile: path.join(cacheRoot, "build.lock"),
+  };
 }
 
 async function main() {
@@ -248,18 +280,20 @@ async function main() {
     console.log(USAGE);
     return;
   }
-  const configPath = path.resolve(args.config || path.join(ROOT, "sop.config.json"));
-  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  const { config, outDir, cacheRoot, lockFile } = settings(args);
   const token = loadToken();
   if (!token) {
     console.error("No Notion token. Put NOTION_TOKEN=… in .env (see README.md).");
     process.exit(1);
   }
-  const outDir = path.resolve(args.out || path.join(path.dirname(configPath), config.outDir || DEFAULTS.outDir));
+  if (!(await acquireLock(lockFile))) {
+    console.error(`Another build is already running (${lockFile}). Try again when it's finished.`);
+    process.exit(1);
+  }
   const api = new Notion(token);
   const started = Date.now();
   try {
-    const r = await build({ api, config, outDir, images: args.images, cache: args.cache });
+    const r = await build({ api, config, outDir, images: args.images, cache: args.cache, cacheDir: path.join(cacheRoot, "assets") });
     const secs = ((Date.now() - started) / 1000).toFixed(1);
     const n = r.warnings.length;
     console.log(`\nBuilt ${r.pages.length} SOP${r.pages.length === 1 ? "" : "s"} into ${outDir} in ${secs}s ` +
@@ -269,6 +303,8 @@ async function main() {
     if (existsSync(outDir)) console.error("The existing site was left unchanged.");
     if (!(e instanceof NotionError) && process.env.DEBUG) console.error(e.stack);
     process.exitCode = 1;
+  } finally {
+    await releaseLock(lockFile);
   }
 }
 

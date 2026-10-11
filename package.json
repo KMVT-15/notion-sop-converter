@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "node src/build.js",
+    "build:if-changed": "node src/build-if-changed.js",
     "serve": "node src/serve.js",
     "test": "node --test tests/*.test.js",
     "test:parity": "node tests/parity/run.js",

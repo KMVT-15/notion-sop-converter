@@ -92,8 +92,9 @@ class Workspace {
 }
 
 const select = (name, color) => ({ type: "select", select: { id: name, name, color } });
+let rowN = 0;
 const contactRow = (name, desc, phone, email, org, color) => ({
-  object: "page",
+  object: "page", id: `d0000000-0000-4000-8000-${String(++rowN).padStart(12, "0")}`, last_edited_time: "2026-10-09T20:54:00.000Z",
   properties: {
     Name: { type: "title", title: [rt(name)] },
     Description: { type: "rich_text", rich_text: [rt(desc)] },

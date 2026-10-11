@@ -32,7 +32,7 @@ npm install
 npm run build
 ```
 
-This writes the site to `dist/`. It takes a few seconds per SOP, and photos are converted to compact WebP files and cached in `.cache/`, so rebuilds are faster. Rebuild whenever the SOPs change in Notion; nothing updates automatically.
+This writes the site to `dist/`. It takes a few seconds per SOP, and photos are converted to compact WebP files and cached in `.cache/`, so rebuilds are faster. Rebuild whenever the SOPs change in Notion, or let cron do it (below).
 
 ```
 dist/
@@ -57,6 +57,29 @@ If a build fails (Notion is down, the token is wrong…), the previous `dist/` i
 
 **Preview locally:** `npm run serve` → <http://localhost:8080>.
 
+### Rebuilding automatically (cron)
+
+`npm run build:if-changed` checks Notion and runs the build only if something changed since the last build. It checks for:
+
+- an SOP edited, added, removed, renamed or reordered
+- a Contact Info (or other inline database) entry added, removed or edited
+- a change to `sop.config.json`
+
+It needs only a couple of Notion requests per SOP and prints nothing when there's nothing to do, so it's cheap to run often. When it does rebuild, it logs a line saying why, e.g. `[2026-10-10 18:27:03] Rebuilding: "Sunnyvale" edited`, followed by the usual build output.
+
+Add it to your crontab (`crontab -e`). Use the full path to `node` (`which node`), because cron doesn't use your shell's PATH:
+
+```
+*/5 * * * * cd /path/to/notion-sop-converter && /opt/homebrew/bin/node src/build-if-changed.js >> .cache/cron.log 2>&1
+```
+
+Any build options are passed through, so to keep the web server's folder up to date directly, add `--out /path/to/served/folder`. Notes:
+
+- **Code changes:** changes to this project's code or styles aren't detected; run `npm run build` yourself after updating it.
+- **No overlap:** only one build runs at a time, manual or cron. A cron check that finds a build running skips that round, and the next one catches up.
+- **Failures:** if a build fails, the site is left as it was and the next check tries again.
+- **Minute rounding:** Notion's edit times are rounded to the minute, so an edit made within a minute or two of a build triggers one extra rebuild to make sure it's included.
+
 ---
 
 ## Settings (`sop.config.json`)
@@ -68,6 +91,7 @@ If a build fails (Notion is down, the token is wrong…), the previous `dist/` i
 | `skipSections` | Heading/database titles left out of every SOP, with everything under them (default `Change Log`, `Changelog`). They're never even downloaded. |
 | `timezone` | Time zone for "Updated" dates and the build time (default `America/Los_Angeles`). |
 | `outDir` | Where `npm run build` writes the site (default `dist`). |
+| `cacheDir` | Where photos, map lookups and the build lock are kept (default `.cache`). |
 | `siteTitle` | Optional. Home page title; defaults to the Notion page's title ("City Operations"). |
 
 ---

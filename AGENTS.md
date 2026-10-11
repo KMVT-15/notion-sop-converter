@@ -4,7 +4,7 @@ Handoff notes for anyone (human or agent) working on this project. [README.md](R
 
 ## What this is
 
-A Node static-site generator. It reads the KMVT city SOPs from Notion with an integration token, then writes a folder with an `index.html` listing the SOPs and one `<slug>.html` per SOP. The folder is hosted on KMVT's internal network behind the VPN: **no auth**, **manual rebuilds** (`npm run build`), then copy to the web server. Those were the owner's decisions; don't add CI, scheduling or login without asking.
+A Node static-site generator. It reads the KMVT city SOPs from Notion with an integration token, then writes a folder with an `index.html` listing the SOPs and one `<slug>.html` per SOP. The folder is hosted on KMVT's internal network behind the VPN: **no auth**, rebuilt by hand (`npm run build`) or by a cron job the owner sets up (`npm run build:if-changed`, added on request 2026-10-10). Those were the owner's decisions; don't add CI, other scheduling or login without asking.
 
 Source page: Notion **Endeavors › City SOP Improvements › City Operations** (`3f47446c6b1f80e4bb50f410da1d15b3`). Don't confuse it with the older **Wiki › City Operations**. The production build must use the API token, never the Claude Notion connector.
 
@@ -67,6 +67,14 @@ Order matters in `build()`: **every** page is converted before **any** page is r
   - Stand-in convention: a paragraph whose only content is one link (not a bare URL, not code) renders as `<a class="button">`, and consecutive ones share one `<p class="buttons">` row (`linkButton()` in convert.js).
 - **Dates use `timezone`** (default America/Los_Angeles). The Python tool showed UTC, so its "Updated" date could be a day ahead in the evening. Date-only values are never shifted.
 - **Home page:** the same sheet, header and title styling as the SOPs. It's a list of card-style rows (page icon or initial, title, Updated date), in Notion's order. Template is excluded via config.
+- **Change detection for cron** (`src/changes.js`, `src/build-if-changed.js`):
+  - Every build writes a JSON **snapshot** into the output folder's `.city-sops-build` marker: the SOP list (ids, titles, order), each SOP page's `last_edited_time`, each inline database's rows (ids + `last_edited_time`, hashed), the parent page's time, a hash of the settings (minus outDir/cacheDir), and `takenAt`.
+  - `takenAt` uses Notion's own clock (the `Date` header, `api.serverDate`).
+  - The checker takes the same snapshot with only timestamp requests: parent page, its children, each SOP page, and each database known from the last snapshot. If `describeChanges()` returns reasons, it spawns `node src/build.js` with the same args, using `process.execPath` because cron's PATH is minimal.
+  - Inline database row edits don't bump the page's time, which is why rows are tracked separately. New databases show up as a page edit.
+  - **Notion's times are rounded to the minute:** anything edited within `SETTLE_MS` (2 min) of the previous `takenAt` triggers one more build.
+  - **Lock:** `<cacheDir>/build.lock` (pid). `npm run build` takes it, and refuses to start while another live build holds it. The checker silently skips while it's held. A dead holder's lock is taken over.
+  - An old plain-text marker, or none, means "no previous build", so the checker rebuilds once.
 - **Safe output swap:** build into a hidden temp folder next to `outDir` (chmod 755, because `mkdtemp` makes it owner-only and the web server must read it), then rename it into place. The build refuses to replace a non-empty folder without the `.city-sops-build` marker, since `--out` might be pointed at a shared web root.
 
 ## Testing
@@ -74,6 +82,7 @@ Order matters in `build()`: **every** page is converted before **any** page is r
 - `npm test`: node:test. Unit tests plus an end-to-end build against `tests/fake-notion.js`, which serves `tests/fixtures/notion.js`. Pages are 2 results long and the first 2 requests return 429, so pagination and retry are always exercised. It asserts that Change Log content and excluded pages are never fetched.
 - `npm run test:parity`: runs the original Python tool and the Node port against the same fake API and diffs the body markup. Image/link URLs, width/height and anchor ids are normalized first. It must stay identical.
   - The fake API runs in the test process, so the Python child must be spawned **async**: `execFileSync` deadlocks.
+- `tests/build-if-changed.test.js` runs the real checker CLI as cron would (async `execFile`, `NOTION_API_BASE` pointed at the fake API, a temp config with its own `cacheDir`) and edits the fake workspace between runs.
 - `npm run demo`: builds the fixture workspace into `.demo/`. `node tests/render-check.js <page> <dir>` takes screenshots and a Letter PDF via headless Chrome; inspect with `pdftoppm -r 50 -png`.
 - **Fixtures:**
   - Sunnyvale is the real page's content, rebuilt in API shape, with generated images.

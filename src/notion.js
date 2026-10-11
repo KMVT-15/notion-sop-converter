@@ -82,7 +82,11 @@ export class Notion {
         continue;
       }
       const text = await res.text();
-      if (res.ok) return JSON.parse(text);
+      if (res.ok) {
+        const date = res.headers.get("date");
+        if (date) this.serverDate = new Date(date); // Notion's clock, for comparing with its edit times
+        return JSON.parse(text);
+      }
       let msg = "";
       try {
         msg = JSON.parse(text).message || "";
