@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.demo/
+.cache/
+.env
+.*.tmp-*/
+.*.old-*/
+.DS_Store
