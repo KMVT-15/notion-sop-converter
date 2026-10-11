@@ -1,6 +1,6 @@
 {
   "rootPage": "https://www.notion.so/City-Operations-3f47446c6b1f80e4bb50f410da1d15b3",
-  "exclude": ["Template"],
+  "exclude": [],
   "skipSections": ["Change Log", "Changelog"],
   "timezone": "America/Los_Angeles",
   "outDir": "dist"
