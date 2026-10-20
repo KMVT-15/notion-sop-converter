@@ -85,6 +85,8 @@ server {
 - an SOP edited, added, removed, renamed or reordered
 - a Contact Info (or other inline database) entry added, removed or edited
 - a change to `sop.config.json`
+- a sort added or changed on a Contact Info (or other inline database) view
+- a change to this project's code or styles, e.g. after a `git pull`
 
 It needs only a couple of Notion requests per SOP and prints nothing when there's nothing to do, so it's cheap to run often. When it does rebuild, it logs a line saying why, e.g. `[2026-10-10 18:27:03] Rebuilding: "Sunnyvale" edited`, followed by the usual build output.
 
@@ -96,7 +98,7 @@ Add it to your crontab (`crontab -e`). Use the full path to `node` (`which node`
 
 Any build options are passed through, so to keep the web server's folder up to date directly, add `--out /path/to/served/folder`. Notes:
 
-- **Code changes:** changes to this project's code or styles aren't detected; run `npm run build` yourself after updating it.
+- **Code changes:** the check stamps `src/`, `assets/` and `package-lock.json`, so running `git pull` before it deploys code and style updates. If a pull changes dependencies, run `npm ci` too.
 - **No overlap:** only one build runs at a time, manual or cron. A cron check that finds a build running skips that round, and the next one catches up.
 - **Failures:** if a build fails, the site is left as it was and the next check tries again.
 - **Minute rounding:** Notion's edit times are rounded to the minute, so an edit made within a minute or two of a build triggers one extra rebuild to make sure it's included.
@@ -146,7 +148,7 @@ How Notion content is styled (same as the old tool, except photos are bigger and
 | Numbered list inside a card | a. b. c. (top level 1. 2. 3., deeper i. ii.), like Notion |
 | To-do list | Checkboxes you can tick on screen (click the box or the text). Ticks aren't saved; reloading the page clears them. Unticked boxes print empty |
 | Columns | Columns (stack on phone screens) |
-| Inline database (e.g. Contact Info) | Small contact-style cards; select tags keep their Notion color |
+| Inline database (e.g. Contact Info) | Small contact-style cards; select tags keep their Notion color. Order: the database's first view's sort, else oldest first (see below) |
 | Images (incl. iPhone HEIC) | Converted to WebP (up to 2000px). Shown as wide as the card/column they're in (small images aren't enlarged), at most 4.5" tall, no frame. Click to view full screen |
 | A paragraph that's only a Google Maps link | Map tile with Google Maps + Apple Maps buttons |
 | A paragraph that's only a link | Button (printed as an outlined label) |
@@ -174,6 +176,7 @@ To print an SOP or save it as a PDF, use the browser's Print (⌘P / Ctrl+P). Pr
 - **Notion buttons** aren't in the API at all; see *Buttons* above.
 - **Table widths and column colors:** not in the API. Tables size to their content, and a gray *column color* isn't shaded. Turn on **Header column** in the table's options to shade the first column instead.
 - **Linked databases** (views of a database that lives elsewhere) can't be read; use inline databases.
+- **Card order:** Notion's API can't read the order you drag cards into. With no sort on the database's first view, cards are listed oldest first (where Notion puts new entries). To control the order, add a sort to that view in Notion (e.g. Organization, then Name); the site follows it.
 - **"Updated" date** is the page's last edit in Notion. Edits inside an inline database (e.g. a contact's phone number) may not change it.
 
 ---

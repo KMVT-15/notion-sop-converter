@@ -2,12 +2,14 @@
 //
 // Every build records a snapshot of what it was built from in the output folder's
 // marker file: the SOP list, each SOP page's last-edited time, each inline database's
-// rows, and the settings. The checker takes the same snapshot cheaply (about two
-// Notion requests per SOP, no page contents) and rebuilds only if anything differs.
+// rows and sort order, the settings, and this tool's own code. The checker takes the same
+// snapshot cheaply (about two Notion requests per SOP, no page contents) and rebuilds only
+// if anything differs.
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const MARKER = ".city-sops-build"; // marks an output folder as ours, and holds the snapshot
 
@@ -20,6 +22,29 @@ const hash = (s) => createHash("sha1").update(s).digest("hex").slice(0, 16);
 /** Settings that change the output; outDir/cacheDir don't. */
 export const configStamp = (cfg) => hash(JSON.stringify({ ...cfg, outDir: undefined, cacheDir: undefined }));
 
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const CODE = ["src", "assets", "package-lock.json"]; // everything that shapes the output
+
+/** This tool's code and styles: a `git pull` that changes them changes the stamp. */
+export function codeStamp(root = ROOT) {
+  const files = [];
+  const walk = (rel) => {
+    let entries;
+    try {
+      entries = readdirSync(path.join(root, rel), { withFileTypes: true });
+    } catch (e) {
+      if (e.code === "ENOTDIR") return files.push(rel);
+      if (e.code === "ENOENT") return;
+      throw e;
+    }
+    for (const d of entries) if (!d.name.startsWith(".")) walk(path.join(rel, d.name)); // not .DS_Store
+  };
+  CODE.forEach(walk);
+  const h = createHash("sha1");
+  for (const f of files.sort()) h.update(`${f}\0`).update(readFileSync(path.join(root, f))).update("\0");
+  return h.digest("hex").slice(0, 16);
+}
+
 /** A database's rows -> { stamp, newest }: any added, removed or edited row changes the stamp. */
 export function rowsStamp(rows) {
   const times = rows.map((r) => r.last_edited_time || "").sort();
@@ -31,22 +56,27 @@ export function rowsStamp(rows) {
  * @param {object} p.cfg  settings, with defaults applied
  * @param {object} p.root  the Notion parent page
  * @param {Array<{id: string, title: string, edited: string}>} p.sops  in Notion's order
- * @param {Object<string, {page: string, title: string, rows: Array}>} p.databases  inline databases by id
+ * @param {Object<string, {page: string, title: string, rows: Array, sorts: Array}>} p.databases  inline databases by id
  * @param {Date} p.takenAt  when the data was read (Notion's clock when available)
+ * @param {string} [p.code]  codeStamp()
  */
-export function snapshot({ cfg, root, sops, databases, takenAt }) {
+export function snapshot({ cfg, root, sops, databases, takenAt, code = codeStamp() }) {
   return {
     takenAt: takenAt.toISOString(),
+    code,
     config: configStamp(cfg),
     root: { edited: root.last_edited_time },
     sops: sops.map(({ id, title, edited }) => ({ id, title, edited })),
-    databases: Object.fromEntries(Object.entries(databases).map(([id, db]) => [id, { page: db.page, title: db.title, ...rowsStamp(db.rows) }])),
+    databases: Object.fromEntries(Object.entries(databases).map(([id, db]) => [id, {
+      page: db.page, title: db.title, ...rowsStamp(db.rows), order: hash(JSON.stringify(db.sorts || [])),
+    }])),
   };
 }
 
 /** What changed between two snapshots, as readable reasons; [] means nothing. */
 export function describeChanges(prev, next) {
   const reasons = [];
+  if (prev.code !== next.code) reasons.push("this tool's code was updated");
   if (prev.config !== next.config) reasons.push("settings changed");
   if (prev.root.edited !== next.root.edited) reasons.push("the SOPs' parent page changed");
   const before = new Map(prev.sops.map((s) => [s.id, s]));
@@ -61,6 +91,7 @@ export function describeChanges(prev, next) {
   if (!reasons.length && prev.sops.map((s) => s.id).join() !== next.sops.map((s) => s.id).join()) reasons.push("SOPs reordered");
   for (const [id, db] of Object.entries(prev.databases)) {
     if (next.databases[id]?.stamp !== db.stamp) reasons.push(`"${db.page}": ${db.title} entries changed`);
+    else if (next.databases[id].order !== db.order) reasons.push(`"${db.page}": ${db.title} sort order changed`);
   }
   const cutoff = Date.parse(prev.takenAt) - SETTLE_MS;
   const recent = [prev.root.edited, ...prev.sops.map((s) => s.edited), ...Object.values(prev.databases).map((d) => d.newest)]

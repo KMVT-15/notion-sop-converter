@@ -6,7 +6,7 @@ import { after, before, test } from "node:test";
 import { build, settings } from "../src/build.js";
 import { Notion, NotionError } from "../src/notion.js";
 import { startFakeNotion, TEST_TOKEN } from "./fake-notion.js";
-import { CHANGELOG_DB, EXAMPLE_SKIPPED_PARA, OPERATOR_PC_BLOCK, ROOT_ID, SUNNYVALE_ID, TEMPLATE_ID } from "./fixtures/notion.js";
+import { CHANGELOG_DB, EXAMPLE_SKIPPED_PARA, OPERATOR_PC_BLOCK, ROOT_ID, SUNNYVALE_CONTACTS_DB, SUNNYVALE_ID, TEMPLATE_ID } from "./fixtures/notion.js";
 
 const work = mkdtempSync(path.join(os.tmpdir(), "sop-build-test-"));
 const quiet = () => {};
@@ -88,6 +88,25 @@ test("skipped sections and sub-pages are never fetched", () => {
   assert.ok(!paths.some((p) => p.includes(CHANGELOG_DB)), "Change Log database queried");
   assert.ok(!paths.some((p) => p.includes(EXAMPLE_SKIPPED_PARA)), "content under a Change Log heading fetched");
   assert.ok(!paths.some((p) => p.includes(TEMPLATE_ID)), "excluded Template page fetched");
+});
+
+test("contact cards are in Notion's order: the view's sort if it has one, else oldest first", async () => {
+  const db = fake.workspace.databases[SUNNYVALE_CONTACTS_DB];
+  const rows = db.rows;
+  const names = async () => {
+    const out = path.join(work, "order");
+    await run(out, { images: false });
+    return [...readFileSync(path.join(out, "sunnyvale.html"), "utf8").matchAll(/<p class="person-name">([^<]+)</g)].map((m) => m[1]);
+  };
+  try {
+    db.rows = [...rows].reverse(); // the API's unsorted order isn't the order Notion shows
+    assert.deepEqual(await names(), ["William Gardner", "Sydney Bucek", "David Carnahan"]);
+    db.views = [{ id: "v1", sorts: [{ property: "Name", direction: "ascending" }] }, { id: "v2", sorts: null }];
+    assert.deepEqual(await names(), ["David Carnahan", "Sydney Bucek", "William Gardner"], "first view's sort");
+  } finally {
+    db.rows = rows;
+    delete db.views;
+  }
 });
 
 test("rebuilding reuses cached images, drops unused cache entries, and replaces the previous site", async () => {

@@ -8,11 +8,13 @@
 //
 // What counts as a change: an SOP edited, added, removed, renamed or reordered under the
 // parent page; an entry in an inline database (e.g. Contact Info) added, removed or edited;
-// or sop.config.json settings. Code/CSS changes in this repo don't count; build those by hand.
+// a database's view sort changed; sop.config.json settings; or this repo's code/CSS (e.g. after
+// a `git pull`).
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { DEFAULTS, listSops, loadToken, parseArgs, ROOT, settings } from "./build.js";
 import { describeChanges, lockHeld, readSnapshot, snapshot } from "./changes.js";
+import { rowSorts } from "./load.js";
 import { Notion } from "./notion.js";
 
 /** Snapshot of Notion now, in the same shape the build records. Only reads timestamps, not page contents. */
@@ -23,7 +25,8 @@ async function currentSnapshot(api, cfg, prev) {
   const databases = {};
   await Promise.all(Object.entries(prev.databases).map(async ([id, db]) => {
     try {
-      databases[id] = { ...db, rows: await api.query(id) };
+      const [rows, sorts] = await Promise.all([api.query(id), rowSorts(api, id)]);
+      databases[id] = { ...db, rows, sorts };
     } catch {
       // deleted or unshared: leaving it out counts as a change
     }

@@ -6,7 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { acquireLock, describeChanges, lockHeld, releaseLock, snapshot } from "../src/changes.js";
 
-const snap = ({ takenAt = "2026-10-10T12:00:00Z", sops, rows, cfg } = {}) => snapshot({
+const snap = ({ takenAt = "2026-10-10T12:00:00Z", sops, rows, sorts, cfg, code = "c1" } = {}) => snapshot({
+  code,
   cfg: cfg || { rootPage: "root", exclude: ["Template"], outDir: "dist" },
   root: { last_edited_time: "2026-10-09T20:00:00.000Z" },
   takenAt: new Date(takenAt),
@@ -14,7 +15,7 @@ const snap = ({ takenAt = "2026-10-10T12:00:00Z", sops, rows, cfg } = {}) => sna
     { id: "a", title: "Sunnyvale", edited: "2026-10-09T21:00:00.000Z" },
     { id: "b", title: "Mountain View", edited: "2026-10-08T21:00:00.000Z" },
   ],
-  databases: { db1: { page: "Sunnyvale", title: "Contact Info", rows: rows || [{ id: "r1", last_edited_time: "2026-10-09T20:54:00.000Z" }] } },
+  databases: { db1: { page: "Sunnyvale", title: "Contact Info", rows: rows || [{ id: "r1", last_edited_time: "2026-10-09T20:54:00.000Z" }], sorts } },
 });
 
 test("nothing changed -> nothing to do", () => {
@@ -32,7 +33,9 @@ test("edits, new/removed/renamed/reordered SOPs, contact entries and settings ar
   assert.deepEqual(sops([mv, sv]), ["SOPs reordered"]);
   assert.deepEqual(describeChanges(prev, snap({ rows: [{ id: "r1", last_edited_time: "2026-10-10T09:00:00.000Z" }] })), ['"Sunnyvale": Contact Info entries changed']);
   assert.deepEqual(describeChanges(prev, snap({ rows: [] })), ['"Sunnyvale": Contact Info entries changed'], "a removed entry");
+  assert.deepEqual(describeChanges(prev, snap({ sorts: [{ property: "Name", direction: "ascending" }] })), ['"Sunnyvale": Contact Info sort order changed']);
   assert.deepEqual(describeChanges(prev, snap({ cfg: { rootPage: "root", exclude: [] } })), ["settings changed"]);
+  assert.deepEqual(describeChanges(prev, snap({ code: "c2" })), ["this tool's code was updated"], "e.g. after a git pull");
   assert.deepEqual(describeChanges(prev, snap({ cfg: { rootPage: "root", exclude: ["Template"], outDir: "/srv/sops" } })), [], "where the site is written isn't a change");
 });
 

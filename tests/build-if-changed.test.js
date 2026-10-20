@@ -60,6 +60,12 @@ test("an edited contact entry triggers a rebuild (it doesn't change the page's e
   assert.match((await check()).out, /Rebuilding: "Sunnyvale": Contact Info entries changed/);
 });
 
+test("a new sort on the contacts' view triggers a rebuild", async () => {
+  fake.workspace.databases[SUNNYVALE_CONTACTS_DB].views = [{ id: "v1", sorts: [{ property: "Name", direction: "ascending" }] }];
+  assert.match((await check()).out, /Rebuilding: "Sunnyvale": Contact Info sort order changed/);
+  assert.equal((await check()).out, "");
+});
+
 test("a new SOP under the parent page triggers a rebuild", async () => {
   const w = fake.workspace;
   const id = "e0000000-0000-4000-8000-00000000e002";

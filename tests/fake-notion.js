@@ -5,6 +5,25 @@ import { buildWorkspace } from "./fixtures/notion.js";
 
 export const TEST_TOKEN = "test-token";
 
+const parts0 = (path) => path.split("/")[0];
+
+/** Query sorts on timestamps and text-like properties (enough for the fixtures). Stable, like Notion's. */
+function sorted(rows, sorts = []) {
+  const value = (r, s) => {
+    if (s.timestamp) return r[s.timestamp] || "";
+    const p = r.properties[s.property] || {};
+    const v = p[p.type];
+    return Array.isArray(v) ? v.map((t) => t.plain_text).join("") : v?.name ?? v ?? "";
+  };
+  return [...rows].sort((a, b) => {
+    for (const s of sorts) {
+      const c = String(value(a, s)).localeCompare(String(value(b, s)));
+      if (c) return s.direction === "descending" ? -c : c;
+    }
+    return 0;
+  });
+}
+
 /**
  * @param {object} [opts]
  * @param {number} [opts.pageSize]  max results per page (small values exercise pagination)
@@ -37,7 +56,9 @@ export async function startFakeNotion({ pageSize = 100, rateLimitFirst = 0 } = {
     if (req.headers.authorization !== `Bearer ${TEST_TOKEN}`) {
       return send(401, { object: "error", status: 401, code: "unauthorized", message: "API token is invalid." });
     }
-    if (req.headers["notion-version"] !== "2022-06-28") return send(400, { object: "error", status: 400, message: "Bad Notion-Version" });
+    // Like the real API: views exist only in newer versions; everything else is read as 2022-06-28 shapes.
+    const version = parts0(path) === "views" ? "2025-09-03" : "2022-06-28";
+    if (req.headers["notion-version"] !== version) return send(400, { object: "error", status: 400, message: "Bad Notion-Version" });
     if (limited < rateLimitFirst) {
       limited++;
       return send(429, { object: "error", status: 429, code: "rate_limited", message: "Slow down." }, { "Retry-After": "0" });
@@ -53,6 +74,15 @@ export async function startFakeNotion({ pageSize = 100, rateLimitFirst = 0 } = {
       if (!w.children[id] && !w.blockIds.has(id) && !w.pages[id]) return notFound(`block with ID: ${id}`);
       return send(200, paginate(w.children[id] || [], url.searchParams.get("start_cursor"), limit));
     }
+    if (req.method === "GET" && parts[0] === "views" && parts.length === 1) {
+      const db = w.databases[url.searchParams.get("database_id")];
+      if (!db) return notFound("database");
+      return send(200, paginate((db.views || []).map(({ id }) => ({ object: "view", id })), url.searchParams.get("start_cursor"), limit));
+    }
+    if (req.method === "GET" && parts[0] === "views" && parts.length === 2) {
+      const view = Object.values(w.databases).flatMap((db) => db.views || []).find((v) => v.id === parts[1]);
+      return view ? send(200, { object: "view", sorts: null, ...view }) : notFound(`view with ID: ${parts[1]}`);
+    }
     if (parts[0] === "databases") {
       const db = w.databases[parts[1]];
       if (!db) return notFound(`database with ID: ${parts[1]}`);
@@ -60,8 +90,8 @@ export async function startFakeNotion({ pageSize = 100, rateLimitFirst = 0 } = {
       if (req.method === "POST" && parts[2] === "query") {
         let body = "";
         for await (const chunk of req) body += chunk;
-        const { start_cursor: cursor, page_size: size } = JSON.parse(body || "{}");
-        return send(200, paginate(db.rows, cursor, Math.min(pageSize, size || 100)));
+        const { start_cursor: cursor, page_size: size, sorts } = JSON.parse(body || "{}");
+        return send(200, paginate(sorted(db.rows, sorts), cursor, Math.min(pageSize, size || 100)));
       }
     }
     return notFound("route");

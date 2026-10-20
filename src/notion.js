@@ -2,6 +2,8 @@
 // Pinned to the same API version the original Python tool used, so block shapes match.
 
 export const NOTION_VERSION = "2022-06-28";
+// The Views API (a database's saved views and their sorts) only exists in this newer version.
+export const VIEWS_VERSION = "2025-09-03";
 const DEFAULT_BASE = "https://api.notion.com/v1";
 
 export class NotionError extends Error {}
@@ -25,10 +27,10 @@ export class Notion {
     this.pausedUntil = 0;
   }
 
-  async req(method, path, body) {
+  async req(method, path, body, version = NOTION_VERSION) {
     await this.acquire();
     try {
-      return await this.send(method, path, body);
+      return await this.send(method, path, body, version);
     } finally {
       this.release();
     }
@@ -48,7 +50,7 @@ export class Notion {
     else this.active--;
   }
 
-  async send(method, path, body) {
+  async send(method, path, body, version) {
     const url = `${this.base}/${path.replace(/^\/+/, "")}`;
     for (let attempt = 0; attempt < 6; attempt++) {
       const pause = this.pausedUntil - Date.now();
@@ -60,7 +62,7 @@ export class Notion {
           method,
           headers: {
             Authorization: `Bearer ${this.token}`,
-            "Notion-Version": NOTION_VERSION,
+            "Notion-Version": version,
             "Content-Type": "application/json",
           },
           body: body === undefined ? undefined : JSON.stringify(body),
@@ -125,9 +127,26 @@ export class Notion {
     return this.req("GET", `databases/${id}`);
   }
 
-  async query(id) {
+  /** A database's saved views ({id} only), in tab order. */
+  async views(databaseId) {
     const out = [];
-    const body = { page_size: 100 };
+    let cursor;
+    do {
+      const qs = new URLSearchParams({ database_id: databaseId, page_size: "100", ...(cursor && { start_cursor: cursor }) });
+      const r = await this.req("GET", `views?${qs}`, undefined, VIEWS_VERSION);
+      out.push(...(r.results || []));
+      cursor = r.has_more ? r.next_cursor : null;
+    } while (cursor);
+    return out;
+  }
+
+  view(id) {
+    return this.req("GET", `views/${id}`, undefined, VIEWS_VERSION);
+  }
+
+  async query(id, sorts) {
+    const out = [];
+    const body = { page_size: 100, ...(sorts && { sorts }) };
     for (;;) {
       const r = await this.req("POST", `databases/${id}/query`, body);
       out.push(...(r.results || []));
