@@ -50,4 +50,10 @@ export default [
     from: "  .doc-head .site{display:none}\n",
     to: "",
   },
+  {
+    date: "2026-10-20",
+    why: "Owner: photos are full width (no 4.5in height cap, small images scale up).",
+    from: "figure.photo img{display:block;max-width:100%;max-height:4.5in;width:auto;height:auto;border-radius:4pt}",
+    to: "figure.photo img{display:block;width:100%;height:auto;border-radius:4pt}",
+  },
 ];

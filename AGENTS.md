@@ -17,6 +17,7 @@ The SOP page design was approved by the owner over several review rounds. **[ref
 - `assets/css/sop.css` is that tool's CSS **plus the owner-approved changes listed in `tests/parity/approved-css-changes.js`**. `npm run test:parity` fails on any other difference. To change the look, get the owner's OK, then add an entry there.
 - **Approved changes so far:**
   - 2026-10-09: photos are as wide as their container (was max 3.2in × 2.2in), capped at 4.5in tall, with no border or white background. This supersedes the photo-size rules in the reference AGENTS.md §8. Print now runs longer: Sunnyvale is 6 Letter pages with its fixture photos.
+  - 2026-10-20: photos are always full width of their container (`width:100%`), with no height cap; small images scale up. Supersedes the 4.5in cap above. Sunnyvale still prints on 6 Letter pages; a tall portrait photo would now take most of a page.
   - 2026-10-09: the **kmvt15.org** text at the top right of the header was removed (owner request). The header is now just the lockup and the purple rule.
   - 2026-10-09: the on-screen **Print / Save PDF button was removed** (owner request), along with its CSS. Browser printing (⌘P) still uses the print styles and footer.
   - 2026-10-09: on screen the background is plain white, with no "paper sheet" (no gray surround, shadow or rounded edge). Content stays centered at max 8.5in with the same padding. This supersedes the reference AGENTS.md §3.3 and §11 screen look; print is unchanged.

@@ -47,7 +47,9 @@
   const dialog = document.createElement("dialog");
   dialog.className = "lightbox";
   dialog.setAttribute("aria-label", "Photo, full screen");
-  dialog.innerHTML = '<button type="button" class="lightbox-close" aria-label="Close">×</button>' +
+  dialog.innerHTML = '<button type="button" class="lightbox-close" aria-label="Close">' +
+    '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">' +
+    '<path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>' +
     '<figure><img alt=""><figcaption></figcaption></figure>';
   document.body.append(dialog);
   const big = dialog.querySelector("img");

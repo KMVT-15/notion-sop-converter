@@ -35,7 +35,8 @@ ul.checklist > li.done > span:last-child{color:var(--muted);text-decoration:line
 .lightbox img{flex:1 1 auto;min-height:0;width:100%;object-fit:contain}
 .lightbox figcaption{flex:none;max-width:60em;text-align:center;font-size:14px;line-height:1.4;color:#e9e6ec}
 .lightbox-close{position:fixed;top:12px;right:14px;width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:50%;
-  background:rgba(255,255,255,.14);color:#fff;font:400 28px/1 var(--font-body);cursor:pointer}
+  padding:0;background:rgba(255,255,255,.14);color:#fff;cursor:pointer}
+.lightbox-close svg{display:block}
 .lightbox-close:hover{background:rgba(255,255,255,.26)}
 .lightbox-close:focus-visible{outline:2px solid #fff;outline-offset:2px}
 body:has(.lightbox[open]){overflow:hidden}
