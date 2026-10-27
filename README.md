@@ -156,7 +156,7 @@ How Notion content is styled (same as the old tool, except photos are bigger and
 | Table with **Header row** / **Header column** turned on | Shaded header row / first column |
 | `Change Log` heading/database | Left out |
 
-To print an SOP or save it as a PDF, use the browser's Print (⌘P / Ctrl+P). Printed pages get the KMVT footer and page numbers (Chrome/Edge). When a photo or step wouldn't fit at the bottom of a page and would leave a big empty gap, the photos on that page print a little smaller (left-aligned) so it fits. On screen, photos always stay full width. This assumes US Letter at 100% scale.
+To print an SOP or save it as a PDF, use the browser's Print (⌘P / Ctrl+P). Printed pages get the KMVT footer and page numbers (Chrome/Edge). Photos print at three-quarters of the text width, left-aligned and at most 5in tall. When a photo or step wouldn't fit at the bottom of a page and would leave a big empty gap, the photos on that page print a little smaller still so it fits. On screen, photos always stay full width. This assumes US Letter at 100% scale.
 
 ---
 

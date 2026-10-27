@@ -22,6 +22,12 @@ ul.checklist > li.done > span:last-child{color:var(--muted);text-decoration:line
   ul.checklist .box[role="checkbox"]:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 }
 
+/* a card holding a to-do list (e.g. the Quick Checklist) may split across printed pages, like cards with
+   photos, so a long one doesn't leave the page before it empty; single items stay whole. Not print-only:
+   assets/site.js measures with the screen styles. */
+.card:has(> ul.checklist){break-inside:auto;page-break-inside:auto;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.card:has(> ul.checklist) li{break-inside:avoid;page-break-inside:avoid}
+
 /* photos open full screen when clicked (assets/site.js) */
 @media screen{
   figure.photo img[role="button"]{cursor:zoom-in}
@@ -45,15 +51,22 @@ body:has(.lightbox[open]){overflow:hidden}
 @media screen and (max-width:720px){.lightbox figure{padding:56px 8px 12px}}
 @media print{.lightbox{display:none}}
 
-/* printing: photos are shrunk a little where that saves a mostly empty page (assets/site.js). To find
+/* printing: photos are 3/4 of the text width (full width side by side in columns). assets/site.js also
+   caps their height, and shrinks them a little more where that saves a mostly empty page. To find
    where pages would break, the script briefly lays the page out at the printed width with this class;
    these rules mirror the layout-changing print rules (sop.css @page and @media print, and below). */
 html.print-measure{width:7.5in}
 html.print-measure .sheet{max-width:none;margin:0;padding:0}
 html.print-measure code{white-space:normal}
 html.print-measure a.button{padding:2pt 8pt;border:.75pt solid;box-shadow:none}
+html.print-measure figure.photo img{width:75%}
+html.print-measure .column figure.photo img{width:100%}
 html.print-measure figure.photo img[data-print-scale]{width:calc(var(--print-scale) * 100%)}
-@media print{figure.photo img[data-print-scale]{width:calc(var(--print-scale) * 100%)}}
+@media print{
+  figure.photo img{width:75%}
+  .column figure.photo img{width:100%}
+  figure.photo img[data-print-scale]{width:calc(var(--print-scale) * 100%)}
+}
 
 /* a paragraph that's only a link becomes a button (Notion's own buttons can't be read by its API) */
 .buttons{display:flex;flex-wrap:wrap;gap:6pt;margin:2pt 0 7pt}

@@ -82,10 +82,11 @@
   dialog.addEventListener("click", () => dialog.close());
 })();
 
-// Printing: where something would be pushed to the next page and leave a big empty gap, the
-// photos on that page are shrunk a little, all by the same amount, so it fits instead. Photos
-// taller than a page are shrunk to fit on one. Screen sizes never change: the sizes only apply
-// in print (site.css). Page breaks are estimated for US Letter at 100% with the @page margins.
+// Printing: photos print at 3/4 of the text width (full width in columns), at most 5in tall.
+// Where something would then be pushed to the next page and leave a big empty gap, the photos
+// on that page are shrunk a little more, all by the same amount, so it fits instead. Screen sizes
+// never change: the sizes only apply in print (site.css). Page breaks are estimated for US
+// Letter at 100% with the @page margins.
 (() => {
   const sheet = document.querySelector(".sheet");
   const photos = [...document.querySelectorAll("figure.photo img")];
@@ -94,7 +95,9 @@
   const PAGE_H = (11 - 0.5 - 0.55) * 96; // printable height in CSS px (sop.css @page)
   const SLACK = 8; // px left free at the foot of a page, for rounding
   const MIN_GAP = 48; // px; a smaller gap isn't worth resizing photos for
-  const MIN_SCALE = 0.6; // never below 60% of full size
+  const MIN_SCALE = 0.6; // a fit never shrinks photos below 60% of their size
+  const PRINT_WIDTH = 0.75; // default printed width, as a share of the text width (site.css)
+  const PRINT_MAX_H = 5 * 96; // and the tallest a photo prints, in CSS px
   // Side-by-side photos: shrinking one may not shorten its row, so they're left alone.
   const shrinkable = (img) => !img.closest(".column");
 
@@ -170,11 +173,13 @@
     const root = document.documentElement;
     root.classList.add("print-measure");
     try {
-      // Photos taller than a page (with their caption) shrink to fit one.
+      // Default size: the share of the width set in site.css, but no taller than PRINT_MAX_H.
       for (const img of photos) {
-        const h = img.getBoundingClientRect().height;
-        const extra = img.closest("figure").getBoundingClientRect().height - h;
-        if (h && h + extra > PAGE_H - SLACK) scale.set(img, (PAGE_H - SLACK - extra) / h);
+        const r = img.getBoundingClientRect();
+        if (!r.width) continue;
+        const fullHeight = img.closest("figure").clientWidth * (r.height / r.width);
+        const width = img.closest(".column") ? 1 : PRINT_WIDTH;
+        scale.set(img, Math.min(width, PRINT_MAX_H / fullHeight));
       }
       apply();
 
