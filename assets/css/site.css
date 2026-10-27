@@ -45,6 +45,16 @@ body:has(.lightbox[open]){overflow:hidden}
 @media screen and (max-width:720px){.lightbox figure{padding:56px 8px 12px}}
 @media print{.lightbox{display:none}}
 
+/* printing: photos are shrunk a little where that saves a mostly empty page (assets/site.js). To find
+   where pages would break, the script briefly lays the page out at the printed width with this class;
+   these rules mirror the layout-changing print rules (sop.css @page and @media print, and below). */
+html.print-measure{width:7.5in}
+html.print-measure .sheet{max-width:none;margin:0;padding:0}
+html.print-measure code{white-space:normal}
+html.print-measure a.button{padding:2pt 8pt;border:.75pt solid;box-shadow:none}
+html.print-measure figure.photo img[data-print-scale]{width:calc(var(--print-scale) * 100%)}
+@media print{figure.photo img[data-print-scale]{width:calc(var(--print-scale) * 100%)}}
+
 /* a paragraph that's only a link becomes a button (Notion's own buttons can't be read by its API) */
 .buttons{display:flex;flex-wrap:wrap;gap:6pt;margin:2pt 0 7pt}
 a.button{display:inline-block;padding:5pt 11pt;border-radius:5pt;background:var(--purple);color:#fff;

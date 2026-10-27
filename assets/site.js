@@ -1,5 +1,5 @@
 // Behavior for SOP pages. The HTML works without it (it's the printable document);
-// this adds the on-screen extras.
+// this adds the on-screen extras, and fits photos to the printed pages.
 
 // To-do items can be checked off: click the box or the item's text, or Space/Enter on
 // the box. Checks aren't saved; reloading the page starts a fresh list.
@@ -80,4 +80,155 @@
     });
   }
   dialog.addEventListener("click", () => dialog.close());
+})();
+
+// Printing: where something would be pushed to the next page and leave a big empty gap, the
+// photos on that page are shrunk a little, all by the same amount, so it fits instead. Photos
+// taller than a page are shrunk to fit on one. Screen sizes never change: the sizes only apply
+// in print (site.css). Page breaks are estimated for US Letter at 100% with the @page margins.
+(() => {
+  const sheet = document.querySelector(".sheet");
+  const photos = [...document.querySelectorAll("figure.photo img")];
+  if (!sheet || !photos.length) return;
+
+  const PAGE_H = (11 - 0.5 - 0.55) * 96; // printable height in CSS px (sop.css @page)
+  const SLACK = 8; // px left free at the foot of a page, for rounding
+  const MIN_GAP = 48; // px; a smaller gap isn't worth resizing photos for
+  const MIN_SCALE = 0.6; // never below 60% of full size
+  // Side-by-side photos: shrinking one may not shorten its row, so they're left alone.
+  const shrinkable = (img) => !img.closest(".column");
+
+  // The page's unsplittable pieces: boxes that avoid breaking inside (photos, cards, steps with
+  // photos, tables, ...) and lines of text. Each lists the photos in it, and `deco`: the padding
+  // and border that cards around it repeat at the top and bottom of a page when they're split.
+  function collect(el, out, deco = { top: 0, bottom: 0 }) {
+    const cs = getComputedStyle(el);
+    const count = out.length;
+    collectIn(el, cs, out, deco);
+    // headings: the browser keeps them on the same page as what follows
+    if (cs.breakAfter.startsWith("avoid")) for (const p of out.slice(count)) p.keep = true;
+  }
+
+  function collectIn(el, cs, out, deco) {
+    const r = el.getBoundingClientRect();
+    if (el.matches("img, svg, video, canvas, iframe, hr") || (cs.breakInside.startsWith("avoid") && r.height <= PAGE_H)) {
+      const inside = el.matches("figure.photo img") ? [el] : [...el.querySelectorAll("figure.photo img")];
+      if (r.height) out.push({ top: r.top, bottom: r.bottom, photos: inside.filter(shrinkable), deco });
+      return;
+    }
+    if ((cs.boxDecorationBreak || cs.webkitBoxDecorationBreak) === "clone") {
+      const px = (v) => parseFloat(v) || 0;
+      deco = { top: deco.top + px(cs.paddingTop) + px(cs.borderTopWidth), bottom: deco.bottom + px(cs.paddingBottom) + px(cs.borderBottomWidth) };
+    }
+    let run = []; // inline content between block children
+    const flush = () => {
+      if (!run.length) return;
+      const range = document.createRange();
+      range.setStartBefore(run[0]);
+      range.setEndAfter(run.at(-1));
+      const rects = [...range.getClientRects()].filter((q) => q.width && q.height).sort((a, b) => a.top - b.top);
+      const lines = [];
+      for (const q of rects) {
+        const line = lines.at(-1);
+        if (line && q.top < line.bottom - 2) line.bottom = Math.max(line.bottom, q.bottom);
+        else lines.push({ top: q.top, bottom: q.bottom, photos: [], deco, lines });
+      }
+      out.push(...lines);
+      run = [];
+    };
+    for (const node of el.childNodes) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const display = getComputedStyle(node).display;
+        if (display === "none") continue;
+        if (!display.startsWith("inline")) {
+          flush();
+          collect(node, out, deco);
+          continue;
+        }
+      } else if (node.nodeType !== Node.TEXT_NODE) continue;
+      run.push(node);
+    }
+    flush();
+  }
+
+  function fit() {
+    const scale = new Map(photos.map((img) => [img, 1]));
+    const apply = () => {
+      for (const [img, s] of scale) {
+        if (s < 0.999) {
+          img.dataset.printScale = "";
+          img.style.setProperty("--print-scale", s.toFixed(4));
+        } else {
+          delete img.dataset.printScale;
+          img.style.removeProperty("--print-scale");
+        }
+      }
+    };
+    apply();
+    // At phone widths the screen-only phone layout would skew the measurements.
+    if (matchMedia("screen and (max-width: 720px)").matches) return;
+    const root = document.documentElement;
+    root.classList.add("print-measure");
+    try {
+      // Photos taller than a page (with their caption) shrink to fit one.
+      for (const img of photos) {
+        const h = img.getBoundingClientRect().height;
+        const extra = img.closest("figure").getBoundingClientRect().height - h;
+        if (h && h + extra > PAGE_H - SLACK) scale.set(img, (PAGE_H - SLACK - extra) / h);
+      }
+      apply();
+
+      const pieces = [];
+      collect(sheet, pieces);
+      pieces.sort((a, b) => a.top - b.top);
+      const height = new Map(photos.map((img) => [img, img.getBoundingClientRect().height]));
+      const origin = sheet.getBoundingClientRect().top;
+
+      // Lay the pieces out on pages. `shift` is how far shrinking has moved later content up.
+      let pageTop = 0, shift = 0, onPage = [];
+      const at = (p) => p.top - origin - shift;
+      pieces.forEach((p, k) => {
+        const bottom = p.bottom - origin - shift;
+        const end = pageTop + PAGE_H - p.deco.bottom;
+        if (bottom <= end) {
+          onPage.push(...p.photos);
+          return;
+        }
+        // Doesn't fit, so the page would end here, or earlier: like the browser, keep at least 2
+        // lines of a paragraph on each side of a break, and keep headings with what follows.
+        let first = p;
+        if (p.lines) {
+          let i = Math.min(p.lines.indexOf(p), p.lines.length - 2);
+          first = p.lines[i < 2 ? 0 : i];
+        }
+        let j = pieces.indexOf(first);
+        while (j > 0 && pieces[j - 1].keep && at(pieces[j - 1]) > pageTop) j--;
+        first = pieces[j];
+
+        // Shrink the photos on this page (and in this piece) if that's enough and worth it:
+        // the bigger the gap it would leave, the more shrinking is acceptable.
+        const gap = end - at(first), need = bottom - end + SLACK;
+        const group = [...onPage, ...p.photos];
+        const total = group.reduce((sum, img) => sum + height.get(img), 0);
+        const s = total ? 1 - need / total : 0;
+        if (gap >= MIN_GAP && s >= Math.max(MIN_SCALE, 1 - gap / PAGE_H)) {
+          for (const img of group) {
+            height.set(img, height.get(img) * s);
+            scale.set(img, scale.get(img) * s);
+          }
+          shift += need;
+          onPage = group;
+          return;
+        }
+        const start = at(first) - first.deco.top;
+        pageTop = start > pageTop ? start : pageTop + PAGE_H; // a piece taller than a page fills it
+        onPage = pieces.slice(j, k + 1).flatMap((q) => q.photos);
+      });
+      apply();
+    } finally {
+      root.classList.remove("print-measure");
+    }
+  }
+
+  addEventListener("beforeprint", fit);
 })();
